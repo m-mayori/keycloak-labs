@@ -1,3 +1,8 @@
+/****************************/
+/* OpenID Connect functions */
+/****************************/
+
+// Load the OpenID Provider Configuration
 function loadDiscovery() {
     var issuer = getInput('input-issuer');
     setState('issuer', issuer);
@@ -13,32 +18,50 @@ function loadDiscovery() {
     req.send();
 }
 
-// Create an Authorization Request
-function generateAuthorizationRequest() {
+// Create an Authentication Request
+function generateAuthenticationRequest() {
     var req = state.discovery['authorization_endpoint'];
 
     var clientId = getInput('input-clientid');
     var scope = getInput('input-scope');
+    var prompt = getInput('input-prompt');
+    var maxAge = getInput('input-maxage');
+    var loginHint = getInput('input-loginhint');
 
-    var authorizationInput = {
+    var authenticationInput = {
         clientId: clientId,
-        scope: scope
+        scope: scope,
+        prompt: prompt,
+        maxAge: maxAge,
+        loginHint: loginHint
     }
-    setState('authorizationInput', authorizationInput);
+    setState('authenticationInput', authenticationInput);
 
     req += '?client_id=' + clientId;
     req += '&response_type=code';
     req += '&redirect_uri=' + document.location.href.split('?')[0];
     if ('' !== scope) {
         req += '&scope=' + scope;
-
+    }
+    if ('' !== prompt) {
+        req += '&prompt=' + prompt;
+    }
+    if ('' !== maxAge) {
+        req += '&max_age=' + maxAge;
+    }
+    if ('' !== loginHint) {
+        req += '&kc_idp_hint=' + loginHint;
     }
 
-    document.location.href = req;
+    setOutput('output-authenticationRequest', req.replace('?', '<br/><br/>').replaceAll('&', '<br/>'));
+    document.getElementById('authenticationRequestLink').onclick = function() {
+        document.location.href = req;
+    }
 }
 
 // Create a Token Exchange Request
-function loadTokens(code) {
+function loadTokens() {
+    var code = getInput('input-code');
     var clientId = getInput('input-clientid');
 
     var params = 'grant_type=authorization_code';
@@ -50,46 +73,82 @@ function loadTokens(code) {
     req.onreadystatechange = function() {
         if (req.readyState === 4) {
             var response = JSON.parse(req.responseText);
+            setOutput('output-response', req.responseText);
 
-            if (response['access_token']) {
-                var accessToken = response['access_token'].split('.');
-                var accessTokenHeader = JSON.parse(base64UrlDecode(accessToken[0]));
-                var accessTokenBody = JSON.parse(base64UrlDecode(accessToken[1]));
-                var accessTokenSignature = accessToken[2];
-                setOutput('output-accessTokenHeader', accessTokenHeader);
-                setOutput('output-accessToken', accessTokenBody);
-                setOutput('output-accessTokenSignature', accessTokenSignature);
-                document.getElementById('output-accessTokenEncoded').innerHTML = response['access_token'];
+            if (response['id_token']) {
+                var idToken = response['id_token'].split('.');
+                var idTokenHeader = JSON.parse(base64UrlDecode(idToken[0]));
+                var idTokenBody = JSON.parse(base64UrlDecode(idToken[1]));
+                var idTokenSignature = idToken[2];
+                setOutput('output-idtokenHeader', idTokenHeader);
+                setOutput('output-idtoken', idTokenBody);
+                setOutput('output-idtokenSignature', idTokenSignature);
                 setState('refreshToken', response['refresh_token']);
+                setState('idToken', response['id_token']);
                 setState('accessToken', response['access_token']);
             } else {
-                setOutput('output-accessToken', '');
+                setOutput('output-idtoken', '');
             }
         }
     }
     req.open('POST', state.discovery['token_endpoint'], true);
     req.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
 
+    setOutput('output-tokenRequest', state.discovery['token_endpoint'] + '<br/><br/>' + params.replaceAll('&', '<br/>'));
+
     req.send(params);
 
     window.history.pushState({}, document.title, '/');
 }
 
-// Create a Service Request
-function invokeService() {
+// Create a Refresh Token Request
+function refreshTokens() {
+    var code = getInput('input-code');
+    var clientId = getInput('input-clientid');
+
+    var params = 'grant_type=refresh_token';
+    params += '&refresh_token=' + state.refreshToken;
+    params += '&client_id=' + clientId;
+    params += '&scope=openid';
+
     var req = new XMLHttpRequest();
     req.onreadystatechange = function() {
         if (req.readyState === 4) {
-            if (req.status === 0) {
-                setOutput('output-serviceResponse', "Failed to send request");
+            var response = JSON.parse(req.responseText);
+            setOutput('output-refreshResponse', req.responseText);
+
+            if (response['id_token']) {
+                var idToken = JSON.parse(base64UrlDecode(response['id_token'].split('.')[1]));
+                setOutput('output-idtokenRefreshed', idToken);
+                setState('refreshToken', response['refresh_token']);
             } else {
-                setOutput('output-serviceResponse', req.responseText);
+                setOutput('output-idtokenRefreshed', '');
             }
         }
     }
-    console.debug(serviceUrl);
-    req.open('GET', serviceUrl, true);
+    req.open('POST', state.discovery['token_endpoint'], true);
+    req.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+
+    setOutput('output-refreshRequest', state.discovery['token_endpoint'] + '<br/><br/>' + params.replaceAll('&', '<br/>'));
+
+    req.send(params);
+
+    window.history.pushState({}, document.title, '/');
+}
+
+// Create a UserInfo Request
+function userInfo() {
+    var req = new XMLHttpRequest();
+    req.onreadystatechange = function() {
+        if (req.readyState === 4) {
+            var response = JSON.parse(req.responseText);
+            setOutput('output-userInfoResponse', req.responseText);
+        }
+    }
+    req.open('GET', state.discovery['userinfo_endpoint'], true);
     req.setRequestHeader('Authorization', 'Bearer ' + state.accessToken);
+
+    setOutput('output-userInfoRequest', state.discovery['userinfo_endpoint'] + '<br/><br/>' + 'Authorization: Bearer ' + state.accessToken);
 
     req.send();
 
@@ -100,7 +159,7 @@ function invokeService() {
 /* Application functions */
 /*************************/
 
-var steps = ['discovery', 'authorization', 'invoke']
+var steps = ['discovery', 'authentication', 'token', 'refresh', 'userinfo']
 var state = loadState();
 
 function reset() {
@@ -137,11 +196,15 @@ function step(step) {
                 setInput('input-issuer', state.issuer);
             }
             break;
-        case 'authorization':
-            var authorizationInput = state.authorizationInput;
-            if (authorizationInput) {
-                setInput('input-clientid', authorizationInput.clientId);
-                setInput('input-scope', authorizationInput.scope);
+        case 'authentication':
+            var authenticationInput = state.authenticationInput;
+            if (authenticationInput) {
+                setInput('input-clientid', authenticationInput.clientId);
+                setInput('input-scope', authenticationInput.scope);
+                setInput('input-prompt', authenticationInput.prompt);
+                setInput('input-maxage', authenticationInput.maxAge);
+                setInput('input-loginhint', authenticationInput.loginHint);
+                setOutput('output-authenticationResponse', '');
             }
             break;
     }
@@ -199,12 +262,13 @@ function init() {
 
     var code = getQueryVariable('code');
     if (code) {
-        loadTokens(code);
+        setInput('input-code', code);
+        setOutput('output-authenticationResponse', 'code=' + code);
     }
 
     var error = getQueryVariable('error');
     var errorDescription = getQueryVariable('error_description');
     if (error) {
-        setOutput('output-authorizationResponse', 'error=' + error + '<br/>error_description=' + errorDescription);
+        setOutput('output-authenticationResponse', 'error=' + error + '<br/>error_description=' + errorDescription);
     }
 }

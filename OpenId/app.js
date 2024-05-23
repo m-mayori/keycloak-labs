@@ -1,9 +1,9 @@
 const express = require('express');
 const app = express();
 const stringReplace = require('string-replace-middleware');
-const port = 8000;
-const KC_URL = process.env.KC_URL || "http://localhost:8080"
-const SERVICE_URL = process.env.SERVICE_URL || "http://localhost:7071/graphql";
+
+const KC_URL = process.env.KC_URL || "http://localhost:8080"//"https://kube-dev-eus.connex.baxter.com/";
+const SERVICE_URL = process.env.SERVICE_URL || "http://localhost:3000/secured";
 
 app.use(stringReplace({
     'SERVICE_URL': SERVICE_URL,
@@ -15,5 +15,5 @@ app.get('/', function(req, res) {
     res.render('index.html');
 });
 
-console.log('Open Id running in port ', port)
-app.listen(port);
+
+app.listen(8000);
