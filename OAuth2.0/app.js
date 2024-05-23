@@ -14,5 +14,5 @@ app.use(express.static('.'))
 app.get('/', function(req, res) {
     res.render('index.html');
 });
-console.log('Open Id running in port ', port)
+console.log('Oauth running in port ', port)
 app.listen(port);
